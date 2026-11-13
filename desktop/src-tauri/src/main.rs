@@ -193,8 +193,9 @@ fn node_ready(app: AppHandle, args: Ready) {
 #[cfg(target_os = "macos")]
 fn keep_awake() {
     use objc2_foundation::{NSActivityOptions, NSProcessInfo, NSString};
-    let token = NSProcessInfo::processInfo().beginActivityWithOptions_reason(
-        NSActivityOptions::NSActivityUserInitiatedAllowingIdleSystemSleep, &NSString::from_str("CORVAX node"));
+    // SAFETY: a plain Foundation call with valid arguments; the returned token is kept for the life of the process.
+    let token = unsafe { NSProcessInfo::processInfo().beginActivityWithOptions_reason(
+        NSActivityOptions::NSActivityUserInitiatedAllowingIdleSystemSleep, &NSString::from_str("CORVAX node")) };
     std::mem::forget(token);
 }
 #[cfg(not(target_os = "macos"))]

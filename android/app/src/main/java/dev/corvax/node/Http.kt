@@ -30,7 +30,7 @@ class Http(private val host: HostBridge) {
         return sid
     }
 
-    private fun handle(sid: Long, s: Socket) = s.use {
+    private fun handle(sid: Long, s: Socket) { s.use {
         val input = DataInputStream(BufferedInputStream(s.getInputStream()))
         val (method, target) = line(input)?.split(" ")?.let { it[0] to it.getOrElse(1) { "/" } } ?: return
         val headers = JSONObject()
@@ -47,7 +47,7 @@ class Http(private val host: HostBridge) {
         val res = q.poll(45, TimeUnit.SECONDS) ?: Res(504, JSONObject(), ByteArray(0))
         waiting.remove(rid); watcher.interrupt()
         runCatching { write(s.getOutputStream(), res) }
-    }
+    } }
 
     fun respond(rid: Long, status: Int, headers: JSONObject, body: ByteArray) { waiting[rid]?.offer(Res(status, headers, body)) }
 
