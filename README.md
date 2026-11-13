@@ -2,9 +2,13 @@
 
 Small native apps that run a [CORVAX](https://github.com/sloev/CORVAX) node on your computer or phone, in the background.
 
-> **Status:**
-> - **Desktop:** built and run on Linux. A **4.6 MB** release binary; the node runs inside it, and other CORVAX apps on the machine found it and messaged through it.
-> - **Android:** a sketch, not yet built.
+> **Status:** every push builds a [release](https://github.com/sloev/corvax-native/releases/latest):
+> - **Windows:** `.exe` 1.6 MB, `.msi` 2.2 MB
+> - **macOS:** `.dmg` 6.8 MB, Apple silicon and Intel
+> - **Linux:** `.deb` and `.rpm` 2.1 MB, `.AppImage` 81 MB (it bundles the webview)
+> - **Android:** preview APK 2.2 MB
+>
+> **Tested so far:** the Linux desktop app, run headless, served the node, and other CORVAX apps on the machine used it. The Android APK builds but is **not yet tested on a device**. Builds are unsigned.
 >
 > See [Build and test](#build-and-test).
 
