@@ -1,0 +1,9 @@
+shared/corvax/
+desktop/web/shared/
+android/app/src/main/assets/shared/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+android/.gradle/
+android/app/build/
+android/local.properties
+node_modules/

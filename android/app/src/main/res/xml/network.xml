@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The node and apps on this device talk over plain HTTP on loopback; CORVAX encrypts and signs end to end. -->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true"><domain includeSubdomains="false">127.0.0.1</domain><domain includeSubdomains="false">localhost</domain></domain-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

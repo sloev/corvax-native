@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>CORVAX node</title>
+<!-- Hidden window: runs the CORVAX node (shared/corvax/corvax-node.min.js) with the Tauri host. -->
+<script type="module">
+  import { startNode } from './shared/host-bridge.js'
+  const { invoke } = window.__TAURI__.core, { listen } = window.__TAURI__.event
+  const bridge = { call: (name, args) => invoke(name, { args }), on: (event, fn) => listen(event, e => fn(e.payload)) }
+  window.node = await startNode(bridge, { relayFor: true })
+</script>

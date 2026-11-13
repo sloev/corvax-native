@@ -1,0 +1,34 @@
+[package]
+name = "corvax-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "CORVAX node for the desktop: the shared JS core in the system webview, a small Rust host"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tokio = { version = "1", features = ["net", "rt-multi-thread", "macros", "sync", "time"] }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+socket2 = { version = "0.5", features = ["all"] }
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hickory-resolver = { version = "0.24", default-features = false, features = ["tokio-runtime", "system-config"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.2", features = ["NSProcessInfo", "NSString"] }
+
+[profile.release]          # small: the size budget is ≤ 8 MB
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

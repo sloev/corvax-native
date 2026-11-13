@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Loaded headless by NodeService from https://appassets.androidplatform.net/assets/node.html (a secure origin,
+     so WebCrypto works). Runs CORVAX's node bundle with the Android host. -->
+<script type="module">
+  import { startNode } from './shared/host-bridge.js'
+  const handlers = new Map()
+  const pending = new Map(); let next = 0
+  // Kotlin → JS: window.__host.emit(event, payload) and window.__host.reply(callId, result, error)
+  window.__host = {
+    emit: (event, payload) => (handlers.get(event) || []).forEach(fn => fn(payload)),
+    reply: (id, result, error) => { const p = pending.get(id); pending.delete(id); error ? p?.reject(new Error(error)) : p?.resolve(result) }
+  }
+  const bridge = {
+    call: (name, args) => new Promise((resolve, reject) => { const id = ++next; pending.set(id, { resolve, reject }); CorvaxHost.call(id, name, JSON.stringify(args)) }),
+    on: (event, fn) => handlers.set(event, [...(handlers.get(event) || []), fn])
+  }
+  window.node = await startNode(bridge, { relayFor: false })      // policy turns relaying on when on Wi-Fi and charging
+</script>

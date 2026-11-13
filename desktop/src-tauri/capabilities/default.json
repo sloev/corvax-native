@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The node window may call the host; the UI window is the node's own homepage and gets nothing.",
+  "windows": ["node"],
+  "permissions": ["core:default", "core:event:default", "autostart:default"]
+}
