@@ -24,7 +24,7 @@
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
     <uses-feature android:name="android.hardware.wifi.direct" android:required="false" />
 
-    <application android:label="CORVAX" android:icon="@drawable/ic_corvax" android:allowBackup="false"
+    <application android:label="CORVAX" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false"
         android:usesCleartextTraffic="true" android:networkSecurityConfig="@xml/network">
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
