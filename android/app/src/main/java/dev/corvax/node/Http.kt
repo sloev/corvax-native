@@ -44,7 +44,7 @@ class Http(private val host: HostBridge) {
         host.emit("http", JSONObject().put("sid", sid).put("rid", rid).put("method", method).put("path", path).put("headers", headers)
             .put("ip", s.inetAddress.hostAddress).put("port", s.port).put("body", HostBridge.b64(body)).toString())
         val watcher = thread { if (runCatching { input.read() }.getOrDefault(-1) == -1) host.emit("http-abort", """{"rid":$rid}""") }   // client went away
-        val res = q.poll(45, TimeUnit.SECONDS) ?: Res(504, JSONObject(), ByteArray(0))
+        val res = q.poll(75, TimeUnit.SECONDS) ?: Res(504, JSONObject(), ByteArray(0))
         waiting.remove(rid); watcher.interrupt()
         runCatching { write(s.getOutputStream(), res) }
     } }
