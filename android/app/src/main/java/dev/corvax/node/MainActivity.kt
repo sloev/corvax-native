@@ -17,14 +17,15 @@ import android.webkit.WebView
  * node serves. Start the service only after the initial runtime-permission request has completed.
  */
 class MainActivity : Activity() {
+    private lateinit var ui: WebView
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        setContentView(WebView(this).apply {
+        ui = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            postDelayed({ loadUrl("http://127.0.0.1:4799/") }, 800) // the node needs a moment on first start
-        })
+        }
+        setContentView(ui)
         requestStartupPermissions()
     }
 
@@ -56,6 +57,8 @@ class MainActivity : Activity() {
     private fun startNode() {
         getSharedPreferences("corvax", MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
         NodeService.start(this)
+        // Permission prompts can take several seconds; only begin loading the local UI after the service starts.
+        ui.postDelayed({ ui.loadUrl("http://127.0.0.1:4799/") }, 800)
 
         val power = getSystemService(PowerManager::class.java)
         if (!power.isIgnoringBatteryOptimizations(packageName)) {
