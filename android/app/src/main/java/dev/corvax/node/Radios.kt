@@ -16,6 +16,7 @@ import android.os.ParcelUuid
 import android.util.Log
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -49,6 +50,11 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
         var lastChunkAt: Long = 0L
     )
     private val partial = ConcurrentHashMap<String, IncomingFrame>()
+    private class OutgoingQueue {
+        val chunks = ArrayDeque<ByteArray>()
+        var busy = false
+    }
+    private val outgoing = ConcurrentHashMap<String, OutgoingQueue>()
     private val maxFrameBytes = 16 * 1024
     private val frameTimeoutMs = 5_000L
     private val p2p = ctx.getSystemService(WifiP2pManager::class.java)
@@ -155,21 +161,55 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
             Log.w(TAG, "BLE datagram needs " + chunkCount + " chunks; negotiated MTU is too small")
             return
         }
-        for (i in 0 until chunkCount) {
-            val start = i * size
-            val end = minOf(start + size, data.size)
-            val payload = if (start < end) data.copyOfRange(start, end) else byteArrayOf()
-            val chunk = byteArrayOf(i.toByte(), if (i == chunkCount - 1) 1 else 0) + payload
-            clients[peer]?.let { g ->
-                g.getService(SERVICE)?.getCharacteristic(WRITE)?.let { characteristic ->
-                    g.writeCharacteristic(characteristic, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
-                }
-            } ?: subscribers[peer]?.let { device ->
-                gatt?.getService(SERVICE)?.getCharacteristic(NOTIFY)?.let { characteristic ->
-                    gatt?.notifyCharacteristicChanged(device, characteristic, false, chunk)
-                }
+        val queue = outgoing.getOrPut(peer) { OutgoingQueue() }
+        synchronized(queue) {
+            for (i in 0 until chunkCount) {
+                val start = i * size
+                val end = minOf(start + size, data.size)
+                val payload = if (start < end) data.copyOfRange(start, end) else byteArrayOf()
+                queue.chunks.add(byteArrayOf(i.toByte(), if (i == chunkCount - 1) 1 else 0) + payload)
             }
         }
+        pump(peer, queue)
+    }
+
+    // Android permits only one outstanding GATT operation per connection. Queue chunks and
+    // advance only after the platform callback confirms the previous write/notification.
+    private fun pump(peer: String, queue: OutgoingQueue) {
+        val chunk: ByteArray
+        synchronized(queue) {
+            if (queue.busy) return
+            chunk = queue.chunks.peekFirst() ?: run {
+                outgoing.remove(peer, queue)
+                return
+            }
+            queue.busy = true
+        }
+        val accepted = clients[peer]?.let { g ->
+            val characteristic = g.getService(SERVICE)?.getCharacteristic(WRITE)
+            characteristic != null && g.writeCharacteristic(characteristic, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+        } ?: subscribers[peer]?.let { device ->
+            val characteristic = gatt?.getService(SERVICE)?.getCharacteristic(NOTIFY)
+            characteristic != null && gatt?.notifyCharacteristicChanged(device, characteristic, false, chunk) == true
+        } ?: false
+        if (!accepted) {
+            synchronized(queue) { queue.busy = false; queue.chunks.clear() }
+            outgoing.remove(peer, queue)
+            Log.w(TAG, "BLE GATT rejected a queued chunk for $peer")
+        }
+    }
+
+    private fun completeOutgoing(peer: String, status: Int) {
+        val queue = outgoing[peer] ?: return
+        synchronized(queue) {
+            if (status == BluetoothGatt.GATT_SUCCESS) queue.chunks.pollFirst()
+            else {
+                Log.w(TAG, "BLE GATT operation failed for $peer with status $status")
+                queue.chunks.clear()
+            }
+            queue.busy = false
+        }
+        pump(peer, queue)
     }
 
     private fun received(peer: String, chunk: ByteArray) {
@@ -232,7 +272,7 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
     }
     private val client = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) {
-            if (state == BluetoothProfile.STATE_CONNECTED) g.requestMtu(517) else { clients.remove(g.device.address); partial.remove(g.device.address); mtu.remove(g.device.address); g.close() }
+            if (state == BluetoothProfile.STATE_CONNECTED) g.requestMtu(517) else { clients.remove(g.device.address); partial.remove(g.device.address); mtu.remove(g.device.address); outgoing.remove(g.device.address); g.close() }
         }
         override fun onMtuChanged(g: BluetoothGatt, m: Int, status: Int) { mtu[g.device.address] = m; g.discoverServices() }
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -241,12 +281,14 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
             c.getDescriptor(CCCD)?.let { g.writeDescriptor(it, BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE) }
         }
         override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) = received(g.device.address, value)
+        override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) = completeOutgoing(g.device.address, status)
     }
     private val server = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(d: BluetoothDevice, status: Int, state: Int) {
-            if (state == BluetoothProfile.STATE_CONNECTED) subscribers[d.address] = d else { subscribers.remove(d.address); partial.remove(d.address); mtu.remove(d.address) }
+            if (state == BluetoothProfile.STATE_CONNECTED) subscribers[d.address] = d else { subscribers.remove(d.address); partial.remove(d.address); mtu.remove(d.address); outgoing.remove(d.address) }
         }
         override fun onMtuChanged(d: BluetoothDevice, m: Int) { mtu[d.address] = m }
+        override fun onNotificationSent(d: BluetoothDevice, status: Int) = completeOutgoing(d.address, status)
         override fun onCharacteristicWriteRequest(d: BluetoothDevice, id: Int, c: BluetoothGattCharacteristic, prep: Boolean, resp: Boolean, off: Int, value: ByteArray) {
             if (c.uuid == WRITE) received(d.address, value)
             if (resp) gatt?.sendResponse(d, id, BluetoothGatt.GATT_SUCCESS, 0, null)
@@ -266,6 +308,7 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
         subscribers.clear()
         mtu.clear()
         partial.clear()
+        outgoing.clear()
         runCatching { gatt?.close() }.onFailure { Log.w(TAG, "Closing BLE GATT server failed", it) }
         gatt = null
         if (hasWifiDirectPermission()) runCatching {
