@@ -24,6 +24,7 @@ jobs:
   esp32s3:
     needs: host
     runs-on: ubuntu-latest
+    continue-on-error: true            # blocked: str0m's DTLS certificate comes from rcgen → aws-lc (no Xtensa support); see embedded/README.md
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
