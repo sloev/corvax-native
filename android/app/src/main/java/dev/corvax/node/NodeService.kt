@@ -32,6 +32,9 @@ class NodeService : Service() {
     private lateinit var host: HostBridge
     private lateinit var radios: Radios
     private var multicast: WifiManager.MulticastLock? = null
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var powerReceiver: BroadcastReceiver? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate() {
@@ -41,7 +44,7 @@ class NodeService : Service() {
 
         web = WebView(applicationContext)
         web.settings.javaScriptEnabled = true
-        web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)          // stays important when not visible
+        web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         val assets = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
         web.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(v: WebView, r: android.webkit.WebResourceRequest) = assets.shouldInterceptRequest(r.url)
@@ -57,17 +60,25 @@ class NodeService : Service() {
     // Wi-Fi + charging → relay and store for others. Re-evaluated on every change.
     private fun watchPolicy() {
         val cm = getSystemService(ConnectivityManager::class.java)
+        connectivityManager = cm
         fun apply() {
             val wifi = cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             val charging = getSystemService(BatteryManager::class.java).isCharging
             host.emit("policy", """{"relay":${wifi && charging},"storage":${wifi && charging}}""")
         }
-        cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { web.post { apply() } }
-            override fun onLost(n: Network) { web.post { apply() } }
-        })
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { if (::web.isInitialized) web.post { apply() } }
+            override fun onLost(n: Network) { if (::web.isInitialized) web.post { apply() } }
+        }
+        cm.registerDefaultNetworkCallback(networkCallback!!)
+
         val power = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED) }
-        registerReceiver(object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = apply() }, power)
+        powerReceiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                if (::web.isInitialized) web.post { apply() }
+            }
+        }
+        registerReceiver(powerReceiver, power)
     }
 
     private fun notification(text: String): Notification {
@@ -81,10 +92,27 @@ class NodeService : Service() {
     private fun update(text: String) = getSystemService(NotificationManager::class.java).notify(1, notification(text))
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == "stop") { stopSelf(); return START_NOT_STICKY }
+        if (intent?.action == "stop") {
+            getSharedPreferences("corvax", MODE_PRIVATE).edit().putBoolean("enabled", false).apply()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         return START_STICKY
     }
-    override fun onDestroy() { radios.stop(); host.close(); web.destroy(); multicast?.release(); super.onDestroy() }
+
+    override fun onDestroy() {
+        networkCallback?.let { callback -> runCatching { connectivityManager?.unregisterNetworkCallback(callback) } }
+        powerReceiver?.let { receiver -> runCatching { unregisterReceiver(receiver) } }
+        networkCallback = null
+        powerReceiver = null
+        if (::radios.isInitialized) radios.stop()
+        if (::host.isInitialized) host.close()
+        if (::web.isInitialized) web.destroy()
+        multicast?.let { lock -> runCatching { if (lock.isHeld) lock.release() } }
+        multicast = null
+        super.onDestroy()
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
