@@ -56,6 +56,7 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
     }
     private val outgoing = ConcurrentHashMap<String, OutgoingQueue>()
     private val maxFrameBytes = 16 * 1024
+    private val maxQueuedChunksPerPeer = 512
     private val frameTimeoutMs = 5_000L
     private val p2p = ctx.getSystemService(WifiP2pManager::class.java)
     private var channel: WifiP2pManager.Channel? = null
@@ -163,6 +164,10 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
         }
         val queue = outgoing.getOrPut(peer) { OutgoingQueue() }
         synchronized(queue) {
+            if (queue.chunks.size + chunkCount > maxQueuedChunksPerPeer) {
+                Log.w(TAG, "Dropping BLE datagram: outbound queue is full for $peer")
+                return
+            }
             for (i in 0 until chunkCount) {
                 val start = i * size
                 val end = minOf(start + size, data.size)
