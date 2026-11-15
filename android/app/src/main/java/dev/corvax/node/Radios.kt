@@ -11,6 +11,7 @@ import android.net.wifi.p2p.WifiP2pManager
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceInfo
 import android.net.wifi.p2p.nsd.WifiP2pDnsSdServiceRequest
 import android.os.Build
+import android.os.SystemClock
 import android.os.ParcelUuid
 import android.util.Log
 import org.json.JSONObject
@@ -42,7 +43,14 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
     private val clients = ConcurrentHashMap<String, BluetoothGatt>()
     private val subscribers = ConcurrentHashMap<String, BluetoothDevice>()
     private val mtu = ConcurrentHashMap<String, Int>()
-    private val partial = ConcurrentHashMap<String, ByteArrayOutputStream>()
+    private data class IncomingFrame(
+        val bytes: ByteArrayOutputStream = ByteArrayOutputStream(),
+        var nextSequence: Int = 0,
+        var lastChunkAt: Long = 0L
+    )
+    private val partial = ConcurrentHashMap<String, IncomingFrame>()
+    private val maxFrameBytes = 16 * 1024
+    private val frameTimeoutMs = 5_000L
     private val p2p = ctx.getSystemService(WifiP2pManager::class.java)
     private var channel: WifiP2pManager.Channel? = null
 
@@ -136,22 +144,83 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
 
     // ---- BLE: the core sends to "ble:<id>" ----------------------------------------------------------
     fun send(peer: String, data: ByteArray) {
-        val size = (mtu[peer] ?: 23) - 5
-        data.toList().chunked(size).forEachIndexed { i, part ->
-            val last = (i + 1) * size >= data.size
-            val chunk = byteArrayOf(i.toByte(), if (last) 1 else 0) + part.toByteArray()
-            clients[peer]?.let { g -> g.getService(SERVICE)?.getCharacteristic(WRITE)?.let { c -> g.writeCharacteristic(c, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE) } }
-                ?: subscribers[peer]?.let { d -> gatt?.getService(SERVICE)?.getCharacteristic(NOTIFY)?.let { c -> gatt?.notifyCharacteristicChanged(d, c, false, chunk) } }
+        val size = ((mtu[peer] ?: 23) - 5).coerceAtLeast(1)
+        if (data.size > maxFrameBytes) {
+            Log.w(TAG, "Dropping oversized BLE datagram (" + data.size + " bytes)")
+            return
+        }
+        val chunkCount = maxOf(1, (data.size + size - 1) / size)
+        // The existing on-air header has an unsigned 8-bit sequence number. Never wrap it.
+        if (chunkCount > 255) {
+            Log.w(TAG, "BLE datagram needs " + chunkCount + " chunks; negotiated MTU is too small")
+            return
+        }
+        for (i in 0 until chunkCount) {
+            val start = i * size
+            val end = minOf(start + size, data.size)
+            val payload = if (start < end) data.copyOfRange(start, end) else byteArrayOf()
+            val chunk = byteArrayOf(i.toByte(), if (i == chunkCount - 1) 1 else 0) + payload
+            clients[peer]?.let { g ->
+                g.getService(SERVICE)?.getCharacteristic(WRITE)?.let { characteristic ->
+                    g.writeCharacteristic(characteristic, chunk, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE)
+                }
+            } ?: subscribers[peer]?.let { device ->
+                gatt?.getService(SERVICE)?.getCharacteristic(NOTIFY)?.let { characteristic ->
+                    gatt?.notifyCharacteristicChanged(device, characteristic, false, chunk)
+                }
+            }
         }
     }
 
     private fun received(peer: String, chunk: ByteArray) {
         if (chunk.size < 2) return
-        val buf = partial.getOrPut(peer) { ByteArrayOutputStream() }
-        if (chunk[0].toInt() == 0) buf.reset()
-        buf.write(chunk, 2, chunk.size - 2)
-        if (buf.size() > 16 * 1024) { buf.reset(); return }
-        if (chunk[1].toInt() and 1 == 1) { host.fromRadio(peer, buf.toByteArray()); buf.reset() }
+        val sequence = chunk[0].toInt() and 0xff
+        val flags = chunk[1].toInt() and 0xff
+        if ((flags and 0xfe) != 0) {
+            partial.remove(peer)
+            return
+        }
+
+        val frame = partial.getOrPut(peer) { IncomingFrame() }
+        synchronized(frame) {
+            val now = SystemClock.elapsedRealtime()
+            if (frame.bytes.size() > 0 && now - frame.lastChunkAt > frameTimeoutMs) {
+                frame.bytes.reset()
+                frame.nextSequence = 0
+            }
+
+            // Reject gaps, duplicates and reordering instead of delivering a corrupt datagram.
+            if (sequence == 0) {
+                frame.bytes.reset()
+                frame.nextSequence = 0
+            }
+            if (sequence != frame.nextSequence) {
+                frame.bytes.reset()
+                frame.nextSequence = 0
+                frame.lastChunkAt = now
+                if (sequence != 0) partial.remove(peer, frame)
+                return
+            }
+
+            val payloadSize = chunk.size - 2
+            if (frame.bytes.size() + payloadSize > maxFrameBytes) {
+                frame.bytes.reset()
+                frame.nextSequence = 0
+                partial.remove(peer, frame)
+                Log.w(TAG, "Dropping oversized incoming BLE frame")
+                return
+            }
+
+            frame.bytes.write(chunk, 2, payloadSize)
+            frame.nextSequence++
+            frame.lastChunkAt = now
+            if ((flags and 1) != 0) {
+                val complete = frame.bytes.toByteArray()
+                frame.bytes.reset()
+                frame.nextSequence = 0
+                host.fromRadio(peer, complete)
+            }
+        }
     }
 
     private val scan = object : ScanCallback() {
@@ -163,7 +232,7 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
     }
     private val client = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, state: Int) {
-            if (state == BluetoothProfile.STATE_CONNECTED) g.requestMtu(517) else { clients.remove(g.device.address); g.close() }
+            if (state == BluetoothProfile.STATE_CONNECTED) g.requestMtu(517) else { clients.remove(g.device.address); partial.remove(g.device.address); mtu.remove(g.device.address); g.close() }
         }
         override fun onMtuChanged(g: BluetoothGatt, m: Int, status: Int) { mtu[g.device.address] = m; g.discoverServices() }
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
@@ -175,7 +244,7 @@ class Radios(private val ctx: Context, private val host: HostBridge) {
     }
     private val server = object : BluetoothGattServerCallback() {
         override fun onConnectionStateChange(d: BluetoothDevice, status: Int, state: Int) {
-            if (state == BluetoothProfile.STATE_CONNECTED) subscribers[d.address] = d else subscribers.remove(d.address)
+            if (state == BluetoothProfile.STATE_CONNECTED) subscribers[d.address] = d else { subscribers.remove(d.address); partial.remove(d.address); mtu.remove(d.address) }
         }
         override fun onMtuChanged(d: BluetoothDevice, m: Int) { mtu[d.address] = m }
         override fun onCharacteristicWriteRequest(d: BluetoothDevice, id: Int, c: BluetoothGattCharacteristic, prep: Boolean, resp: Boolean, off: Int, value: ByteArray) {
