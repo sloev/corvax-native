@@ -80,10 +80,13 @@ class Http(private val host: HostBridge) {
                     if (len < 126L) break // non-minimal encoding
                 } else if (len == 127L) {
                     len = input.readLong()
-                    if (len < 65536L) break // reject the sign bit and non-minimal encoding
+                    if (len < 65536L) break // non-minimal encoding
                 }
-                if (len > 65536L) break
-                if (opcode >= 8 && len > 125L) break // control frames are limited to 125 bytes
+                // readLong() is signed: a set high bit produces a negative value.
+                // Cap allocation even for valid 64-bit lengths to keep one peer bounded.
+                if (len < 0L || len > 16L * 1024L * 1024L) break
+                if (opcode !in setOf(1, 2, 8, 9, 10)) break
+                if (opcode >= 8 && ((b0 and 0x80) == 0 || len > 125L)) break // control frames must be final and <= 125 bytes
                 val mask = ByteArray(4).also { input.readFully(it) }
                 val data = ByteArray(len.toInt()).also { input.readFully(it) }
                 for (i in data.indices) data[i] = (data[i].toInt() xor mask[i and 3].toInt()).toByte()
