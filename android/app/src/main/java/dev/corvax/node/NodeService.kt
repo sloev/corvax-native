@@ -35,6 +35,7 @@ class NodeService : Service() {
     private var connectivityManager: ConnectivityManager? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var powerReceiver: BroadcastReceiver? = null
+    @Volatile private var destroyed = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate() {
@@ -62,23 +63,26 @@ class NodeService : Service() {
         val cm = getSystemService(ConnectivityManager::class.java)
         connectivityManager = cm
         fun apply() {
+            if (destroyed) return
             val wifi = cm.getNetworkCapabilities(cm.activeNetwork)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
             val charging = getSystemService(BatteryManager::class.java).isCharging
             host.emit("policy", """{"relay":${wifi && charging},"storage":${wifi && charging}}""")
         }
         networkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { if (::web.isInitialized) web.post { apply() } }
-            override fun onLost(n: Network) { if (::web.isInitialized) web.post { apply() } }
+            override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { if (::web.isInitialized) web.post { if (!destroyed) apply() } }
+            override fun onLost(n: Network) { if (::web.isInitialized) web.post { if (!destroyed) apply() } }
         }
         cm.registerDefaultNetworkCallback(networkCallback!!)
 
         val power = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED) }
-        powerReceiver = object : BroadcastReceiver() {
+        val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
-                if (::web.isInitialized) web.post { apply() }
+                if (::web.isInitialized) web.post { if (!destroyed) apply() }
             }
         }
-        registerReceiver(powerReceiver, power)
+        powerReceiver = receiver
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, power, Context.RECEIVER_NOT_EXPORTED)
+        else registerReceiver(receiver, power)
     }
 
     private fun notification(text: String): Notification {
@@ -101,6 +105,7 @@ class NodeService : Service() {
     }
 
     override fun onDestroy() {
+        destroyed = true
         networkCallback?.let { callback -> runCatching { connectivityManager?.unregisterNetworkCallback(callback) } }
         powerReceiver?.let { receiver -> runCatching { unregisterReceiver(receiver) } }
         networkCallback = null
