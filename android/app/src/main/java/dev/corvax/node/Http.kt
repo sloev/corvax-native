@@ -9,7 +9,7 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.SynchronousQueue
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -20,7 +20,7 @@ import kotlin.concurrent.thread
 class Http(private val host: HostBridge) {
     private class Res(val status: Int, val headers: JSONObject, val body: ByteArray)
     private val servers = ConcurrentHashMap<Long, ServerSocket>()
-    private val waiting = ConcurrentHashMap<Long, SynchronousQueue<Res>>()
+    private val waiting = ConcurrentHashMap<Long, ArrayBlockingQueue<Res>>()
     private val sockets = ConcurrentHashMap<Long, Socket>()
 
     fun listen(address: String, port: Int): Long {
@@ -40,7 +40,7 @@ class Http(private val host: HostBridge) {
         val len = headers.optString("content-length").toIntOrNull() ?: 0
         if (len > 24 * 1024) return write(s.getOutputStream(), Res(413, JSONObject(), ByteArray(0)))
         val body = ByteArray(len).also { input.readFully(it) }
-        val rid = host.id(); val q = SynchronousQueue<Res>(); waiting[rid] = q
+        val rid = host.id(); val q = ArrayBlockingQueue<Res>(1); waiting[rid] = q
         host.emit("http", JSONObject().put("sid", sid).put("rid", rid).put("method", method).put("path", path).put("headers", headers)
             .put("ip", s.inetAddress.hostAddress).put("port", s.port).put("body", HostBridge.b64(body)).toString())
         val watcher = thread { if (runCatching { input.read() }.getOrDefault(-1) == -1) host.emit("http-abort", """{"rid":$rid}""") }   // client went away
@@ -69,25 +69,51 @@ class Http(private val host: HostBridge) {
         host.emit("ws-open", JSONObject().put("sid", sid).put("wid", wid).put("path", path).toString())
         runCatching {
             while (true) {
-                val b0 = input.readUnsignedByte(); val b1 = input.readUnsignedByte()
+                val b0 = input.readUnsignedByte()
+                val b1 = input.readUnsignedByte()
+                val opcode = b0 and 15
+                val masked = b1 and 128 != 0
                 var len = (b1 and 127).toLong()
-                if (len == 126L) len = input.readUnsignedShort().toLong() else if (len == 127L) break
-                if (b1 and 128 == 0 || len > 65536) break                                  // clients must mask; frames ≤ 64 KB
+                if ((b0 and 0x70) != 0 || (b0 and 0x80) == 0 || !masked) break // no extensions or fragmented messages
+                if (len == 126L) {
+                    len = input.readUnsignedShort().toLong()
+                    if (len < 126L) break // non-minimal encoding
+                } else if (len == 127L) {
+                    len = input.readLong()
+                    if (len < 65536L) break // non-minimal encoding
+                }
+                // readLong() is signed: a set high bit produces a negative value.
+                // Cap allocation even for valid 64-bit lengths to keep one peer bounded.
+                if (len < 0L || len > 16L * 1024L * 1024L) break
+                if (opcode !in setOf(1, 2, 8, 9, 10)) break
+                if (opcode >= 8 && ((b0 and 0x80) == 0 || len > 125L)) break // control frames must be final and <= 125 bytes
                 val mask = ByteArray(4).also { input.readFully(it) }
-                val data = ByteArray(len.toInt()).also { input.readFully(it) }.mapIndexed { i, x -> (x.toInt() xor mask[i and 3].toInt()).toByte() }.toByteArray()
-                when (b0 and 15) {
-                    1 -> host.emit("ws-msg", JSONObject().put("wid", wid).put("text", String(data)).toString())
+                val data = ByteArray(len.toInt()).also { input.readFully(it) }
+                for (i in data.indices) data[i] = (data[i].toInt() xor mask[i and 3].toInt()).toByte()
+                when (opcode) {
+                    1 -> host.emit("ws-msg", JSONObject().put("wid", wid).put("text", String(data, Charsets.UTF_8)).toString())
                     2 -> host.emit("ws-msg", JSONObject().put("wid", wid).put("data", HostBridge.b64(data)).toString())
-                    8 -> break
+                    8 -> { frame(s, 8, data); break }
                     9 -> frame(s, 10, data)
+                    10 -> Unit // pong
+                    else -> break
                 }
             }
         }
         sockets.remove(wid); host.emit("ws-close", """{"wid":$wid}""")
     }
     private fun frame(s: Socket, op: Int, data: ByteArray) = synchronized(s) {
-        val head = if (data.size < 126) byteArrayOf((0x80 or op).toByte(), data.size.toByte())
-                   else byteArrayOf((0x80 or op).toByte(), 126, (data.size shr 8).toByte(), data.size.toByte())
+        if (data.size > 16 * 1024 * 1024 || (op >= 8 && data.size > 125)) return@synchronized
+        val length = data.size.toLong()
+        val head = when {
+            length < 126L -> byteArrayOf((0x80 or op).toByte(), length.toByte())
+            length <= 65535L -> byteArrayOf((0x80 or op).toByte(), 126.toByte(), (length shr 8).toByte(), length.toByte())
+            else -> ByteArray(10).apply {
+                this[0] = (0x80 or op).toByte()
+                this[1] = 127.toByte()
+                for (i in 0..7) this[2 + i] = (length ushr ((7 - i) * 8)).toByte()
+            }
+        }
         runCatching { s.getOutputStream().apply { write(head); write(data); flush() } }
     }
     fun wsSend(wid: Long, text: String?, data: ByteArray?) { val s = sockets[wid] ?: return; if (text != null) frame(s, 1, text.toByteArray()) else if (data != null) frame(s, 2, data) }
