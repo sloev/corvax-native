@@ -1,0 +1,12 @@
+# CORVAX in Rust: the protocol for ESP32 and other devices that can't run the JS core (SPEC: github.com/sloev/CORVAX).
+# Conformance: corvax/tests/vectors.rs checks every primitive against the JS implementation's test vectors.
+[workspace]
+members = ["corvax", "corvax-cli"]
+resolver = "2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

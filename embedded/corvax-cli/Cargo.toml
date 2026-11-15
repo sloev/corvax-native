@@ -1,0 +1,13 @@
+[package]
+name = "corvax-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[[bin]]
+name = "corvax-rs"
+path = "src/main.rs"
+
+[dependencies]
+corvax = { path = "../corvax" }
+serde_json = "1"

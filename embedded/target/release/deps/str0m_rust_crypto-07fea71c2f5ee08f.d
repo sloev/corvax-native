@@ -1,0 +1,11 @@
+/home/user/corvax-native/embedded/target/release/deps/str0m_rust_crypto-07fea71c2f5ee08f.d: /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/lib.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/dtls.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha1.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha256.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/srtp.rs
+
+/home/user/corvax-native/embedded/target/release/deps/libstr0m_rust_crypto-07fea71c2f5ee08f.rlib: /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/lib.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/dtls.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha1.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha256.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/srtp.rs
+
+/home/user/corvax-native/embedded/target/release/deps/libstr0m_rust_crypto-07fea71c2f5ee08f.rmeta: /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/lib.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/dtls.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha1.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha256.rs /root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/srtp.rs
+
+/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/lib.rs:
+/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/dtls.rs:
+/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha1.rs:
+/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/sha256.rs:
+/root/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/str0m-rust-crypto-0.7.0/src/srtp.rs:

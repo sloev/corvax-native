@@ -1,0 +1,23 @@
+# CORVAX on an ESP32-S3 (PSRAM recommended for WebRTC): Wi-Fi, a CORVAX peer, DataChannels.
+# Build: cargo build --release   (needs the Xtensa toolchain: `espup install`; ESP-IDF is fetched by embuild)
+# Flash: espflash flash --monitor target/xtensa-esp32s3-espidf/release/corvax-esp32
+[package]
+name = "corvax-esp32"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+corvax = { path = "../corvax" }
+esp-idf-svc = { version = "0.51", features = ["std", "binstart"] }
+serde_json = "1"
+log = "0.4"
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+
+[package.metadata.esp-idf-sys]
+esp_idf_version = "v5.3.2"

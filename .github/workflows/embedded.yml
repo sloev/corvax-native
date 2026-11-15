@@ -1,0 +1,47 @@
+# The Rust port: conformance with the JS core (test vectors) on the host, then the ESP32-S3 firmware build.
+# Only when embedded/ changes; Rust, the Xtensa toolchain and ESP-IDF are cached. Firmware is attached as an artifact.
+name: embedded
+on:
+  push:
+    branches: [main]
+    paths: ['embedded/**', '.github/workflows/embedded.yml']
+  workflow_dispatch:
+
+concurrency: { group: embedded, cancel-in-progress: true }
+
+jobs:
+  host:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with: { workspaces: embedded, cache-on-failure: true }
+      - run: cargo test --release
+        working-directory: embedded
+
+  esp32s3:
+    needs: host
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: esp-rs/xtensa-toolchain@v1.5
+        with: { default: true, buildtargets: esp32s3, ldproxy: true }
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.espressif
+            embedded/esp32/.embuild
+            embedded/esp32/target
+          key: esp32s3-${{ hashFiles('embedded/esp32/Cargo.toml', 'embedded/esp32/sdkconfig.defaults', 'embedded/corvax/Cargo.toml') }}
+          restore-keys: esp32s3-
+      - name: Build (Wi-Fi from secrets, or placeholders)
+        working-directory: embedded/esp32
+        env:
+          WIFI_SSID: ${{ secrets.WIFI_SSID || 'corvax' }}
+          WIFI_PASS: ${{ secrets.WIFI_PASS || 'change-me-please' }}
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with: { name: corvax-esp32s3, path: embedded/esp32/target/xtensa-esp32s3-espidf/release/corvax-esp32, retention-days: 14 }
