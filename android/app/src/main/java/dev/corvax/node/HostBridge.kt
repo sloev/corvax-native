@@ -40,7 +40,8 @@ class HostBridge(private val ctx: Context, private val web: WebView, private val
         val a = JSONObject(json)
         if (name in setOf("udp_bind", "http_listen", "kv_get", "kv_set")) Trace.log("host: $name ${json.take(80)}")
         pool.execute {
-            try { reply(id, dispatch(name, a)) } catch (e: Exception) { Trace.log("host: $name failed: $e"); reply(id, null, e.message ?: "error") }
+            try { dispatch(name, a).let { if (id != 0L) reply(id, it) } }                       // id 0: fire and forget (log, node_failed)
+            catch (e: Exception) { Trace.log("host: $name failed: $e"); if (id != 0L) reply(id, null, e.message ?: "error") }
         }
     }
 

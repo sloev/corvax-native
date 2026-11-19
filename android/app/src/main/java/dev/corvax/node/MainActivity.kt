@@ -63,7 +63,7 @@ class MainActivity : Activity() {
             for (i in 0 until 240) {                                               // up to 2 minutes, log refreshed every 0.5 s
                 runOnUiThread { log.text = Trace.tail(60) }
                 if (up()) { Trace.log("app: node answered, opening the app"); runOnUiThread { waiting.visibility = View.GONE; web.visibility = View.VISIBLE; web.loadUrl("http://127.0.0.1:4799/") }; return@thread }
-                prefs.getString("error", null)?.let { e -> runOnUiThread { title.text = "CORVAX couldn't start: $e"; log.text = Trace.tail(60) }; return@thread }
+                prefs.getString("error", null)?.let { e -> runOnUiThread { title.text = "CORVAX couldn't start: $e" } }   // keep waiting: it may still come up
                 Thread.sleep(500)
             }
             Trace.log("app: the node didn't answer within 2 minutes")

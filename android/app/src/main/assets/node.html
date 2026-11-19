@@ -5,8 +5,13 @@
 <script>
   // Any startup failure goes to the app screen and the notification (node_failed), not into the void.
   const failed = msg => { try { CorvaxHost.call(0, 'node_failed', JSON.stringify({ error: String(msg).slice(0, 300) })) } catch {} }
-  addEventListener('error', e => failed(e.message || 'script error'))
-  addEventListener('unhandledrejection', e => failed(e.reason?.message || e.reason))
+  // Stray errors after start are logged, not fatal: only the start sequence below decides that the node failed.
+  const note = m => { try { CorvaxHost.call(0, 'log', JSON.stringify({ m: 'uncaught: ' + String(m).slice(0, 500) })) } catch {} }
+  addEventListener('error', e => note(e.error?.stack || e.message))
+  addEventListener('unhandledrejection', e => note(e.reason?.stack || e.reason))
+  // Android may emit before the module below has loaded: keep those events until someone listens.
+  window.__early = []
+  window.__host = { emit: (event, payload) => window.__early.push([event, payload]), reply () {} }
 </script>
 <script type="module">
   const log = m => { console.log(m); try { CorvaxHost.call(0, 'log', JSON.stringify({ m: String(m) })) } catch {} }
@@ -22,7 +27,10 @@
     }
     const bridge = {
       call: (name, args) => new Promise((resolve, reject) => { const id = ++next; pending.set(id, { resolve, reject }); CorvaxHost.call(id, name, JSON.stringify(args)) }),
-      on: (event, fn) => handlers.set(event, [...(handlers.get(event) || []), fn])
+      on: (event, fn) => {
+        handlers.set(event, [...(handlers.get(event) || []), fn])
+        window.__early = window.__early.filter(([e, p]) => e === event ? (fn(p), false) : true)          // events sent before the page was ready
+      }
     }
     // CORVAX keys need Ed25519 and X25519 in WebCrypto (Chromium ≥ 137): say so plainly when the system WebView is older.
     const can = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign']).then(() => crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits'])).then(() => true, () => false)

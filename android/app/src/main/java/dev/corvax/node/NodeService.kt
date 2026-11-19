@@ -53,7 +53,7 @@ class NodeService : Service() {
         val assets = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
         web.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(v: WebView, r: android.webkit.WebResourceRequest) =
-                assets.shouldInterceptRequest(r.url).also { Trace.log("web: ${r.url.path} → ${if (it == null) "NOT FOUND" else "asset"}") }
+                assets.shouldInterceptRequest(r.url).also { if (r.url.host == "appassets.androidplatform.net") Trace.log("web: ${r.url.path} → ${if (it == null) "NOT FOUND" else "asset"}") }
             override fun onPageFinished(v: WebView, url: String) = Trace.log("web: page loaded $url")
             override fun onReceivedError(v: WebView, r: android.webkit.WebResourceRequest, e: androidx.webkit.WebResourceErrorCompat) =
                 Trace.log("web: error ${r.url}: ${if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.WEB_RESOURCE_ERROR_GET_DESCRIPTION)) e.description else "?"}")
