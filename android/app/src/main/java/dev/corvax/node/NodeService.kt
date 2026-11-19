@@ -82,8 +82,8 @@ class NodeService : Service() {
             host.emit("policy", """{"relay":${wifi && charging},"storage":${wifi && charging}}""")
         }
         cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-            override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { web.post { apply() } }
-            override fun onLost(n: Network) { web.post { apply() } }
+            override fun onCapabilitiesChanged(n: Network, c: NetworkCapabilities) { android.os.Handler(android.os.Looper.getMainLooper()).post { apply() } }
+            override fun onLost(n: Network) { android.os.Handler(android.os.Looper.getMainLooper()).post { apply() } }
         })
         val power = IntentFilter().apply { addAction(Intent.ACTION_POWER_CONNECTED); addAction(Intent.ACTION_POWER_DISCONNECTED) }
         registerReceiver(object : BroadcastReceiver() { override fun onReceive(c: Context, i: Intent) = apply() }, power)

@@ -26,16 +26,19 @@ class HostBridge(private val ctx: Context, private val web: WebView, private val
     var radios: Radios? = null
     private val kv = ctx.getSharedPreferences("corvax", Context.MODE_PRIVATE)
 
+    // The service's WebView is never attached to a window, so web.post would queue forever: post to the main looper.
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
     fun id() = ids.incrementAndGet()
-    fun emit(event: String, json: String) = web.post { web.evaluateJavascript("window.__host.emit(${JSONObject.quote(event)}, $json)", null) }
+    fun emit(event: String, json: String) = main.post { web.evaluateJavascript("window.__host.emit(${JSONObject.quote(event)}, $json)", null) }
     private fun reply(id: Long, result: Any?, error: String? = null) {
         val r = when (result) { null -> "null"; is String -> JSONObject.quote(result); else -> result.toString() }
-        web.post { web.evaluateJavascript("window.__host.reply($id, $r, ${if (error == null) "null" else JSONObject.quote(error)})", null) }
+        main.post { web.evaluateJavascript("window.__host.reply($id, $r, ${if (error == null) "null" else JSONObject.quote(error)})", null) }
     }
 
     @JavascriptInterface
     fun call(id: Long, name: String, json: String) {
         val a = JSONObject(json)
+        if (name in setOf("udp_bind", "http_listen", "kv_get", "kv_set")) Trace.log("host: $name ${json.take(80)}")
         pool.execute {
             try { reply(id, dispatch(name, a)) } catch (e: Exception) { Trace.log("host: $name failed: $e"); reply(id, null, e.message ?: "error") }
         }
