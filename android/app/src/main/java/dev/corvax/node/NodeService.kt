@@ -36,7 +36,11 @@ class NodeService : Service() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        // Android 14+ refuses a connectedDevice service without its prerequisites: report it instead of dying silently.
+        try { startForeground(1, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) } catch (e: Exception) {
+            getSharedPreferences("corvax", MODE_PRIVATE).edit().putString("error", "Android didn't allow the background service: ${e.message}").apply()
+            stopSelf(); return
+        }
         multicast = (getSystemService(WIFI_SERVICE) as WifiManager).createMulticastLock("corvax-lan").apply { setReferenceCounted(false); acquire() }
 
         web = WebView(applicationContext)
@@ -46,7 +50,8 @@ class NodeService : Service() {
         web.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(v: WebView, r: android.webkit.WebResourceRequest) = assets.shouldInterceptRequest(r.url)
         }
-        host = HostBridge(this, web) { key, isAnchor -> update(if (isAnchor) "Anchor ${key.take(6)}… · sharing" else "Online ${key.take(6)}…") }
+        getSharedPreferences("corvax", MODE_PRIVATE).edit().remove("error").apply()
+        host = HostBridge(this, web, onFailed = { update("Couldn't start: $it") }) { key, isAnchor -> update(if (isAnchor) "Anchor ${key.take(6)}… · sharing" else "Online ${key.take(6)}…") }
         web.addJavascriptInterface(host, "CorvaxHost")
         radios = Radios(this, host)
         web.loadUrl("https://appassets.androidplatform.net/assets/node.html")
@@ -84,7 +89,12 @@ class NodeService : Service() {
         if (intent?.action == "stop") { stopSelf(); return START_NOT_STICKY }
         return START_STICKY
     }
-    override fun onDestroy() { radios.stop(); host.close(); web.destroy(); multicast?.release(); super.onDestroy() }
+    override fun onDestroy() {
+        if (::radios.isInitialized) radios.stop()
+        if (::host.isInitialized) host.close()
+        if (::web.isInitialized) web.destroy()
+        multicast?.release(); super.onDestroy()
+    }
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {

@@ -2,6 +2,12 @@
 <meta charset="utf-8">
 <!-- Loaded headless by NodeService from https://appassets.androidplatform.net/assets/node.html (a secure origin,
      so WebCrypto works). Runs CORVAX's node bundle with the Android host. -->
+<script>
+  // Any startup failure goes to the app screen and the notification (node_failed), not into the void.
+  const failed = msg => { try { CorvaxHost.call(0, 'node_failed', JSON.stringify({ error: String(msg).slice(0, 300) })) } catch {} }
+  addEventListener('error', e => failed(e.message || 'script error'))
+  addEventListener('unhandledrejection', e => failed(e.reason?.message || e.reason))
+</script>
 <script type="module">
   import { startNode } from './shared/host-bridge.js'
   const handlers = new Map()
@@ -15,5 +21,8 @@
     call: (name, args) => new Promise((resolve, reject) => { const id = ++next; pending.set(id, { resolve, reject }); CorvaxHost.call(id, name, JSON.stringify(args)) }),
     on: (event, fn) => handlers.set(event, [...(handlers.get(event) || []), fn])
   }
-  window.node = await startNode(bridge, { relayFor: false })      // policy turns relaying on when on Wi-Fi and charging
+  // CORVAX keys need Ed25519 and X25519 in WebCrypto (Chromium ≥ 137): say so plainly when the system WebView is older.
+  const can = await crypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign']).then(() => crypto.subtle.generateKey({ name: 'X25519' }, false, ['deriveBits'])).then(() => true, () => false)
+  if (!can) failed('Android System WebView is too old (' + (navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1] || '?') + '). Update it in the Play Store, then reopen CORVAX.')
+  else window.node = await startNode(bridge, { relayFor: false })      // policy turns relaying on when on Wi-Fi and charging
 </script>

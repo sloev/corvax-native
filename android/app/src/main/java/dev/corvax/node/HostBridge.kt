@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicLong
  * CorvaxHost.call(id, name, json) → work on a thread → window.__host.reply(id, result). Events: window.__host.emit.
  * UDP hosts named "ble:<id>" go over Bluetooth (Radios), so the core's DHT and KRPC work over BLE unchanged.
  */
-class HostBridge(private val ctx: Context, private val web: WebView, private val onReady: (String, Boolean) -> Unit) {
+class HostBridge(private val ctx: Context, private val web: WebView, private val onFailed: (String) -> Unit = {}, private val onReady: (String, Boolean) -> Unit) {
     private val pool = Executors.newCachedThreadPool()
     private val ids = AtomicLong()
     private val udp = ConcurrentHashMap<Long, MulticastSocket>()
@@ -53,7 +53,8 @@ class HostBridge(private val ctx: Context, private val web: WebView, private val
         "kv_get" -> kv.getString(a.getString("name"), null)
         "kv_set" -> { kv.edit().putString(a.getString("name"), a.getString("value")).apply(); null }
         "dns_txt" -> ""                                                     // optional; anchors come from other channels
-        "node_ready" -> { onReady(a.getString("key"), a.getString("line").isNotEmpty()); radios?.advertise(a.getString("key"), a.getString("line")); null }
+        "node_failed" -> { val e = a.optString("error", "unknown error"); kv.edit().putString("error", e).apply(); onFailed(e); null }
+        "node_ready" -> { kv.edit().remove("error").apply(); onReady(a.getString("key"), a.getString("line").isNotEmpty()); radios?.advertise(a.getString("key"), a.getString("line")); null }
         else -> throw IllegalArgumentException("unknown $name")
     }
 

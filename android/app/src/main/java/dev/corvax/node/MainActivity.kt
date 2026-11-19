@@ -9,7 +9,13 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
+import android.webkit.WebViewClient
+import java.net.InetSocketAddress
+import java.net.Socket
+import kotlin.concurrent.thread
 
 /**
  * The UI is the node's own homepage (DOX / APP / STATS) at http://127.0.0.1:4799/, the same page every CORVAX
@@ -31,10 +37,31 @@ class MainActivity : Activity() {
         getSharedPreferences("corvax", MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
         NodeService.start(this)
 
-        setContentView(WebView(this).apply {
+        // Show "Starting…" until the node answers on 127.0.0.1:4799 (or reports why it can't), then the app.
+        val web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            postDelayed({ loadUrl("http://127.0.0.1:4799/") }, 800)                // the node needs a moment on first start
-        })
+            webViewClient = object : WebViewClient() {
+                override fun onReceivedError(v: WebView, r: WebResourceRequest, e: WebResourceError) { if (r.isForMainFrame) v.postDelayed({ v.reload() }, 1500) }
+            }
+        }
+        setContentView(web)
+        status(web, "Starting your CORVAX node…")
+        val prefs = getSharedPreferences("corvax", MODE_PRIVATE)
+        thread(name = "corvax-wait") {
+            for (i in 0 until 120) {                                               // up to 60 s
+                if (up()) { runOnUiThread { web.loadUrl("http://127.0.0.1:4799/") }; return@thread }
+                prefs.getString("error", null)?.let { e -> runOnUiThread { status(web, "CORVAX couldn't start", e) }; return@thread }
+                Thread.sleep(500)
+            }
+            runOnUiThread { status(web, "Still starting…", "The node hasn't answered after a minute. Check the CORVAX notification.") }
+        }
+    }
+
+    private fun up() = runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.1", 4799), 300) }; true }.getOrDefault(false)
+    private fun status(web: WebView, title: String, detail: String = "") {
+        val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;") }
+        web.loadDataWithBaseURL(null, "<meta name=viewport content='width=device-width'><body style='font:16px system-ui;padding:24px;color:#17181c;background:#fcfbf8'>" +
+            "<h3>${esc(title)}</h3><p style='color:#6b6e78'>${esc(detail)}</p></body>", "text/html", "utf-8", null)
     }
 }
