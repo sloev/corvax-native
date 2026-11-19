@@ -37,7 +37,7 @@ class HostBridge(private val ctx: Context, private val web: WebView, private val
     fun call(id: Long, name: String, json: String) {
         val a = JSONObject(json)
         pool.execute {
-            try { reply(id, dispatch(name, a)) } catch (e: Exception) { reply(id, null, e.message ?: "error") }
+            try { reply(id, dispatch(name, a)) } catch (e: Exception) { Trace.log("host: $name failed: $e"); reply(id, null, e.message ?: "error") }
         }
     }
 
@@ -53,8 +53,10 @@ class HostBridge(private val ctx: Context, private val web: WebView, private val
         "kv_get" -> kv.getString(a.getString("name"), null)
         "kv_set" -> { kv.edit().putString(a.getString("name"), a.getString("value")).apply(); null }
         "dns_txt" -> ""                                                     // optional; anchors come from other channels
-        "node_failed" -> { val e = a.optString("error", "unknown error"); kv.edit().putString("error", e).apply(); onFailed(e); null }
-        "node_ready" -> { kv.edit().remove("error").apply(); onReady(a.getString("key"), a.getString("line").isNotEmpty()); radios?.advertise(a.getString("key"), a.getString("line")); null }
+        "log" -> { Trace.log("node: ${a.optString("m")}"); null }
+        "node_failed" -> { Trace.log("node FAILED: ${a.optString("error")}")
+             val e = a.optString("error", "unknown error"); kv.edit().putString("error", e).apply(); onFailed(e); null }
+        "node_ready" -> { Trace.log("node ready: ${a.optString("key")} port ${a.optInt("port")}"); kv.edit().remove("error").apply(); onReady(a.getString("key"), a.getString("line").isNotEmpty()); radios?.advertise(a.getString("key"), a.getString("line")); null }
         else -> throw IllegalArgumentException("unknown $name")
     }
 

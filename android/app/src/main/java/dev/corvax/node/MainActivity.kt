@@ -11,7 +11,13 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.view.View
 import android.webkit.WebView
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.webkit.WebViewClient
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -37,31 +43,36 @@ class MainActivity : Activity() {
         getSharedPreferences("corvax", MODE_PRIVATE).edit().putBoolean("enabled", true).apply()
         NodeService.start(this)
 
-        // Show "Starting…" until the node answers on 127.0.0.1:4799 (or reports why it can't), then the app.
+        // Show the node's log until it answers on 127.0.0.1:4799 (or says why it can't), then the app. Share log: any app.
+        Trace.init(this)
         val web = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             webViewClient = object : WebViewClient() {
                 override fun onReceivedError(v: WebView, r: WebResourceRequest, e: WebResourceError) { if (r.isForMainFrame) v.postDelayed({ v.reload() }, 1500) }
             }
+            visibility = View.GONE
         }
-        setContentView(web)
-        status(web, "Starting your CORVAX node…")
+        val title = TextView(this).apply { textSize = 18f; setPadding(32, 32, 32, 8); text = "Starting your CORVAX node…" }
+        val log = TextView(this).apply { textSize = 11f; typeface = android.graphics.Typeface.MONOSPACE; setPadding(32, 8, 32, 32); setTextIsSelectable(true) }
+        val share = Button(this).apply { text = "Share log"; setOnClickListener { share() } }
+        val waiting = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(title); addView(share); addView(ScrollView(context).apply { addView(log) }) }
+        setContentView(FrameLayout(this).apply { addView(waiting); addView(web) })
         val prefs = getSharedPreferences("corvax", MODE_PRIVATE)
         thread(name = "corvax-wait") {
-            for (i in 0 until 120) {                                               // up to 60 s
-                if (up()) { runOnUiThread { web.loadUrl("http://127.0.0.1:4799/") }; return@thread }
-                prefs.getString("error", null)?.let { e -> runOnUiThread { status(web, "CORVAX couldn't start", e) }; return@thread }
+            for (i in 0 until 240) {                                               // up to 2 minutes, log refreshed every 0.5 s
+                runOnUiThread { log.text = Trace.tail(60) }
+                if (up()) { Trace.log("app: node answered, opening the app"); runOnUiThread { waiting.visibility = View.GONE; web.visibility = View.VISIBLE; web.loadUrl("http://127.0.0.1:4799/") }; return@thread }
+                prefs.getString("error", null)?.let { e -> runOnUiThread { title.text = "CORVAX couldn't start: $e"; log.text = Trace.tail(60) }; return@thread }
                 Thread.sleep(500)
             }
-            runOnUiThread { status(web, "Still starting…", "The node hasn't answered after a minute. Check the CORVAX notification.") }
+            Trace.log("app: the node didn't answer within 2 minutes")
+            runOnUiThread { title.text = "The node didn't start. Please share the log."; log.text = Trace.tail(60) }
         }
     }
 
     private fun up() = runCatching { Socket().use { it.connect(InetSocketAddress("127.0.0.1", 4799), 300) }; true }.getOrDefault(false)
-    private fun status(web: WebView, title: String, detail: String = "") {
-        val esc = { s: String -> s.replace("&", "&amp;").replace("<", "&lt;") }
-        web.loadDataWithBaseURL(null, "<meta name=viewport content='width=device-width'><body style='font:16px system-ui;padding:24px;color:#17181c;background:#fcfbf8'>" +
-            "<h3>${esc(title)}</h3><p style='color:#6b6e78'>${esc(detail)}</p></body>", "text/html", "utf-8", null)
-    }
+    private fun share() = startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, "CORVAX log"); putExtra(Intent.EXTRA_TEXT, Trace.text().takeLast(90_000))
+    }, "Share CORVAX log"))
 }

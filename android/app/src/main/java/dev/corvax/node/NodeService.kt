@@ -36,11 +36,15 @@ class NodeService : Service() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate() {
         super.onCreate()
+        Trace.init(this)
+        Trace.log("service: create (Android ${Build.VERSION.SDK_INT}, ${Build.MANUFACTURER} ${Build.MODEL}, WebView ${WebView.getCurrentWebViewPackage()?.versionName})")
         // Android 14+ refuses a connectedDevice service without its prerequisites: report it instead of dying silently.
         try { startForeground(1, notification("Starting…"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE) } catch (e: Exception) {
             getSharedPreferences("corvax", MODE_PRIVATE).edit().putString("error", "Android didn't allow the background service: ${e.message}").apply()
+            Trace.log("service: startForeground refused: $e")
             stopSelf(); return
         }
+        Trace.log("service: foreground")
         multicast = (getSystemService(WIFI_SERVICE) as WifiManager).createMulticastLock("corvax-lan").apply { setReferenceCounted(false); acquire() }
 
         web = WebView(applicationContext)
@@ -48,12 +52,22 @@ class NodeService : Service() {
         web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)          // stays important when not visible
         val assets = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this)).build()
         web.webViewClient = object : WebViewClientCompat() {
-            override fun shouldInterceptRequest(v: WebView, r: android.webkit.WebResourceRequest) = assets.shouldInterceptRequest(r.url)
+            override fun shouldInterceptRequest(v: WebView, r: android.webkit.WebResourceRequest) =
+                assets.shouldInterceptRequest(r.url).also { Trace.log("web: ${r.url.path} → ${if (it == null) "NOT FOUND" else "asset"}") }
+            override fun onPageFinished(v: WebView, url: String) = Trace.log("web: page loaded $url")
+            override fun onReceivedError(v: WebView, r: android.webkit.WebResourceRequest, e: androidx.webkit.WebResourceErrorCompat) =
+                Trace.log("web: error ${r.url}: ${if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.WEB_RESOURCE_ERROR_GET_DESCRIPTION)) e.description else "?"}")
+        }
+        web.webChromeClient = object : android.webkit.WebChromeClient() {                 // the node's console.log and JS errors
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                Trace.log("js ${m.messageLevel().name.lowercase()}: ${m.message()} (${m.sourceId().substringAfterLast('/')}:${m.lineNumber()})"); return true
+            }
         }
         getSharedPreferences("corvax", MODE_PRIVATE).edit().remove("error").apply()
         host = HostBridge(this, web, onFailed = { update("Couldn't start: $it") }) { key, isAnchor -> update(if (isAnchor) "Anchor ${key.take(6)}… · sharing" else "Online ${key.take(6)}…") }
         web.addJavascriptInterface(host, "CorvaxHost")
         radios = Radios(this, host)
+        Trace.log("service: loading node.html")
         web.loadUrl("https://appassets.androidplatform.net/assets/node.html")
         radios.start()
         watchPolicy()
